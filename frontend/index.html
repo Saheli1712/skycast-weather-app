@@ -1,0 +1,967 @@
+<meta charset="utf-8">
+<title>Skycast Travel Weather</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed animated sky behind a two-column glass dashboard; places rail on the right, stacks below 960px.
+   Single visual world: the sky is the theme, so the palette is deliberately dark-glass in both host themes. */
+:root{
+  --ink:#f4f7fb;            /* primary text on glass */
+  --ink-2:#c7d2df;          /* secondary text */
+  --ink-3:#93a3b6;          /* captions */
+  --glass:rgba(10,18,34,.58);
+  --glass-2:rgba(255,255,255,.07);
+  --line:rgba(255,255,255,.14);
+  --sun:#ffc35a;            /* accent: warm sunlight */
+  --sea:#7fd3ff;            /* cool line / lows */
+  --good:#7ee2a8; --fair:#ffd479; --poor:#ff8f8f;
+  --night:#060b1f;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Figtree",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{background:var(--night);color:var(--ink);font:15px/1.5 var(--f-body);-webkit-font-smoothing:antialiased}
+#sky{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
+.app{position:relative;z-index:1;max-width:1320px;margin:0 auto;padding-inline:20px;padding-block:18px 40px;display:flex;flex-direction:column;gap:18px}
+h1,h2,h3{font-family:var(--f-display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.eyebrow{font:500 11px/1.2 var(--f-data);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.glass{background:var(--glass);border:1px solid var(--line);border-radius:18px;backdrop-filter:blur(16px) saturate(1.2);-webkit-backdrop-filter:blur(16px) saturate(1.2)}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible,.day-hit:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+
+/* top bar */
+.top{position:relative;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:12px 18px;padding:12px 16px}
+.brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+.brand h1{font-size:24px}
+.brand span{color:var(--ink-3);font-size:13px}
+.picker{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.picker label{font-size:12px;color:var(--ink-3)}
+input[type=text]{background:var(--glass-2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 12px;font:500 15px var(--f-body);min-width:0}
+input[type=text]::placeholder{color:var(--ink-3)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.picker{flex:1 1 420px;justify-content:flex-end}
+.searchbox{position:relative;flex:1 1 240px;min-width:0;max-width:380px}
+#cityInput{width:100%}
+#suggest{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:5;list-style:none;margin:0;padding:6px;background:rgba(10,18,34,.97);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.4);max-height:320px;overflow:auto}
+#suggest li{padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
+#suggest li small{color:var(--ink-3);font-size:12px;text-align:right}
+#suggest li[aria-selected=true],#suggest li:hover{background:rgba(255,195,90,.16)}
+.quick{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--ink-3)}
+.quick button{background:var(--glass-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--ink-2)}
+.quick button:hover{border-color:var(--sun);color:var(--ink)}
+.search-msg{flex-basis:100%;font-size:13px;color:var(--fair)}
+.search-msg.err{color:var(--poor)}
+.btn{background:var(--sun);color:#1c1405;border:0;border-radius:10px;padding:8px 14px;font-weight:600}
+.btn.ghost{background:var(--glass-2);color:var(--ink);border:1px solid var(--line)}
+.pill{display:inline-flex;align-items:center;gap:6px;font:500 12px var(--f-data);padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--glass-2);color:var(--ink-2);white-space:nowrap}
+.pill i{width:7px;height:7px;border-radius:50%;background:var(--fair);display:inline-block}
+.pill.live i{background:var(--good)}
+
+/* grid */
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.card{padding:20px}
+.card-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px;margin-bottom:14px}
+.card-head h2{font-size:20px}
+.muted{color:var(--ink-3);font-size:13px}
+
+/* hero */
+.hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;padding:24px}
+.hero .place h2{font-size:clamp(30px,5vw,46px);line-height:1.05}
+.hero .place .muted{margin-top:4px}
+.now{display:flex;align-items:center;gap:16px;margin-top:18px}
+.now .big{font:500 clamp(56px,9vw,88px)/1 var(--f-display);letter-spacing:-.04em}
+.now .big sup{font-size:.4em;vertical-align:top;margin-left:2px;color:var(--ink-2)}
+.now .cond{display:flex;flex-direction:column;gap:2px}
+.now .cond strong{font-size:18px}
+.now svg{width:64px;height:64px;flex:none}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start}
+.stat{background:var(--glass-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat b{display:block;font:500 20px var(--f-data);font-variant-numeric:tabular-nums}
+.stat span{font-size:12px;color:var(--ink-3)}
+.note{grid-column:1/-1;font-size:12.5px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.week{grid-column:1/-1;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.week div{text-align:center;background:var(--glass-2);border-radius:10px;padding:6px 2px;font-size:12px}
+.week svg{width:26px;height:26px;display:block;margin:2px auto}
+.week b{font:500 12px var(--f-data)}
+.week em{font-style:normal;color:var(--sea);font:12px var(--f-data)}
+
+/* months */
+.months{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px}
+.mbtn{background:var(--glass-2);border:1px solid var(--line);border-radius:12px;padding:8px 2px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;transition:background .2s,border-color .2s,transform .2s}
+.mbtn svg{width:24px;height:24px}
+.mbtn span{font:600 12px var(--f-body)}
+.mbtn small{font:11px var(--f-data);color:var(--ink-3)}
+.mbtn:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.3)}
+.mbtn[aria-pressed=true]{background:rgba(255,195,90,.18);border-color:var(--sun)}
+.mbtn.best{box-shadow:inset 0 -3px 0 var(--good)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px;font-size:12px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend svg{width:18px;height:18px}
+
+/* chart */
+.season-tag{display:inline-flex;align-items:center;gap:8px;padding:6px 12px 6px 8px;border-radius:999px;background:var(--glass-2);border:1px solid var(--line);font-weight:600}
+.season-tag svg{width:22px;height:22px}
+.chart-wrap{position:relative}
+#chart{display:block;width:100%;height:auto;overflow:visible}
+#chart text{font-family:var(--f-data);fill:var(--ink-3);font-size:11px}
+.tip{position:absolute;pointer-events:none;background:rgba(6,11,24,.92);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12px;white-space:nowrap;transform:translate(-50%,-100%);margin-top:-10px}
+.tip b{font-family:var(--f-data)}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:14px}
+@media (min-width:1100px){.summary{grid-template-columns:repeat(6,minmax(0,1fr))}}
+
+/* best */
+.best-range{font:700 clamp(26px,4vw,36px)/1.1 var(--f-display);color:var(--sun)}
+.best-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-top:10px}
+.best p{margin:0 0 10px;max-width:65ch;color:var(--ink-2)}
+.reasons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.reasons li{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--ink-2)}
+.reasons li svg{width:20px;height:20px;flex:none;margin-top:1px}
+.tipbox{margin-top:12px;font-size:13.5px;color:var(--ink-2);border-left:2px solid var(--sun);padding-left:12px}
+.byline{font:11px var(--f-data);color:var(--ink-3);margin-top:12px}
+
+/* other months */
+.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.mcard{text-align:left;background:var(--glass-2);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.mcard:hover{border-color:rgba(255,255,255,.32)}
+.mcard[aria-current=true]{border-color:var(--sun)}
+.mcard .row{display:flex;align-items:center;gap:8px}
+.mcard .row svg{width:26px;height:26px;flex:none}
+.mcard h3{font-size:16px;margin-right:auto}
+.mcard .nums{font:12px var(--f-data);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.mcard p{margin:0;font-size:13px;color:var(--ink-2)}
+.rate{font:600 11px var(--f-data);letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:999px}
+.rate.best{background:rgba(126,226,168,.18);color:var(--good)}
+.rate.good{background:rgba(127,211,255,.16);color:var(--sea)}
+.rate.fair{background:rgba(255,212,121,.16);color:var(--fair)}
+.rate.poor{background:rgba(255,143,143,.16);color:var(--poor)}
+
+/* places */
+.places{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);max-height:calc(100vh - 32px);overflow:auto}
+.places ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;counter-reset:p}
+.places li{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;padding:12px;border-radius:14px;background:var(--glass-2);border:1px solid var(--line)}
+.places li::before{counter-increment:p;content:counter(p);font:500 13px/32px var(--f-data);text-align:center;width:32px;height:32px;border-radius:50%;background:rgba(255,195,90,.15);color:var(--sun)}
+.places h3{font-size:15.5px}
+.places .type{font:500 10.5px var(--f-data);letter-spacing:.1em;text-transform:uppercase;color:var(--sea)}
+.places p{margin:4px 0 0;font-size:13px;color:var(--ink-2)}
+.places .when{margin-top:14px;font-size:13px;color:var(--ink-2)}
+
+/* scene caption */
+.scene-cap{position:fixed;left:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);z-index:2;display:flex;align-items:center;gap:10px;padding:6px 6px 6px 12px;border-radius:999px;font-size:12.5px}
+.scene-cap button{border:1px solid var(--line);background:var(--glass-2);border-radius:999px;padding:4px 10px;font-size:12px}
+footer{font-size:12px;color:var(--ink-3);text-align:center;padding-bottom:40px}
+
+/* places stay a side panel on every screen wide enough for two columns */
+@media (max-width:1100px){
+  .grid{grid-template-columns:minmax(0,1fr) 270px}
+  .hero{grid-template-columns:minmax(0,1fr)}
+  .months{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .best-grid{grid-template-columns:minmax(0,1fr)}
+}
+/* phones: the panel moves above the forecast as a swipeable row of places */
+@media (max-width:720px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .places{position:static;max-height:none;order:-1;min-width:0}
+  .places ol{flex-direction:row;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px}
+  .places li{flex:0 0 78%;scroll-snap-align:start}
+}
+@media (max-width:640px){
+  .app{padding-inline:16px}
+  .hero{grid-template-columns:minmax(0,1fr);padding:18px}
+  .months{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .best-grid{grid-template-columns:minmax(0,1fr)}
+  .searchbox{max-width:none}
+  .week{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .week div:nth-child(n+5){display:none}
+  .scene-cap{right:16px;justify-content:space-between}
+}
+@media (prefers-reduced-motion:reduce){.mbtn,.mbtn:hover{transition:none;transform:none}}
+</style>
+
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<div class="app">
+  <header class="top glass">
+    <div class="brand"><h1>Skycast</h1><span>Weather and the best time to travel</span></div>
+    <div class="picker">
+      <div class="searchbox">
+        <label for="cityInput" class="sr">City</label>
+        <input id="cityInput" type="text" placeholder="Type any city in the world" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+        <ul id="suggest" role="listbox" hidden></ul>
+      </div>
+      <button id="go" class="btn" type="button">Show weather</button>
+      <span id="src" class="pill"><i></i><span>Built-in climate data</span></span>
+    </div>
+    <div class="quick" id="quick"></div>
+    <div class="search-msg" id="searchMsg" role="status" hidden></div>
+  </header>
+
+  <main class="grid">
+    <div class="col">
+      <section class="hero glass" aria-live="polite">
+        <div class="place">
+          <div class="eyebrow">Today</div>
+          <h2 id="cityName">—</h2>
+          <div class="muted" id="cityMeta"></div>
+          <div class="now">
+            <span id="nowIcon"></span>
+            <div class="big" id="nowTemp">—</div>
+            <div class="cond"><strong id="nowCond"></strong><span class="muted" id="nowHiLo"></span></div>
+          </div>
+        </div>
+        <div class="stats" id="nowStats"></div>
+        <div class="week" id="week" hidden></div>
+        <div class="note" id="nowNote"></div>
+      </section>
+
+      <section class="card glass">
+        <div class="card-head">
+          <h2>Pick a month</h2>
+          <span class="muted">Green underline marks the best months to visit</span>
+        </div>
+        <div class="months" id="months" role="group" aria-label="Month"></div>
+        <div class="legend" id="legend"></div>
+      </section>
+
+      <section class="card glass">
+        <div class="card-head">
+          <div><div class="eyebrow" id="chartEyebrow">Day by day</div><h2 id="chartTitle">—</h2></div>
+          <span class="season-tag" id="seasonTag"></span>
+        </div>
+        <div class="chart-wrap" id="chartWrap">
+          <svg id="chart" role="img" aria-label="Daily high and low temperatures"></svg>
+          <div class="tip" id="tip" hidden></div>
+        </div>
+        <div class="legend">
+          <span><svg viewBox="0 0 18 18"><line x1="1" y1="9" x2="17" y2="9" stroke="#ffc35a" stroke-width="2.5"/></svg>Daily high</span>
+          <span><svg viewBox="0 0 18 18"><line x1="1" y1="9" x2="17" y2="9" stroke="#7fd3ff" stroke-width="2.5"/></svg>Daily low</span>
+          <span id="fcLegend" hidden><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4" fill="#fff"/></svg>Forecast day</span>
+          <span class="muted">Tap a day to see its weather in the sky</span>
+        </div>
+        <div class="summary" id="monthSummary"></div>
+      </section>
+
+      <section class="card glass best" id="best">
+        <div class="eyebrow">Best time to visit</div>
+        <div class="best-range" id="bestRange">—</div>
+        <div class="best-grid">
+          <div><p id="bestWhy"></p><div class="tipbox" id="bestTip"></div></div>
+          <ul class="reasons" id="bestReasons"></ul>
+        </div>
+        <div class="byline" id="adviceBy"></div>
+      </section>
+
+      <section class="card glass">
+        <div class="card-head">
+          <h2>The rest of the year</h2>
+          <span class="muted">What the weather is like, and why it is less suited to a visit</span>
+        </div>
+        <div class="mgrid" id="mgrid"></div>
+      </section>
+    </div>
+
+    <aside class="places card glass" aria-labelledby="placesTitle">
+      <div class="eyebrow">Suggestions</div>
+      <h2 id="placesTitle" style="font-size:20px;margin:2px 0 14px">Places to visit</h2>
+      <ol id="places"></ol>
+      <div class="when" id="placesWhen"></div>
+    </aside>
+  </main>
+
+  <footer id="foot">Type any city in the world. Built-in cities load instantly; other cities use live Open-Meteo data when it can be reached, or climate averages estimated by Claude in this preview.</footer>
+</div>
+
+<div class="scene-cap glass" id="sceneCap"><span id="sceneText">—</span><button type="button" id="sceneReset" hidden>Show today</button></div>
+
+<script id="city-data" type="application/json">{"cities":[{"id":"kolkata","name":"Kolkata","country":"India","region":"India","lat":22.57,"lon":88.36,"tz":"Asia/Kolkata","hi":[26,29,34,36,36,34,32,32,32,32,30,27],"lo":[13,16,21,25,26,27,26,26,26,24,19,14],"rain":[15,25,35,50,135,300,370,340,320,180,30,5],"tip":"October brings Durga Puja, the city's biggest festival. It is still humid then, but worth it for the pandals.","places":[{"name":"Victoria Memorial","type":"Heritage","desc":"White marble museum and gardens; go at dusk for the light-and-sound show."},{"name":"Howrah Bridge & Mallick Ghat","type":"Landmark","desc":"Iconic cantilever bridge beside the riverside flower market, busiest at dawn."},{"name":"Dakshineswar Kali Temple","type":"Spiritual","desc":"Riverside temple tied to Ramakrishna; take the ferry across to Belur Math."},{"name":"College Street","type":"Culture","desc":"Kilometre of bookstalls and the Indian Coffee House, an old adda for writers."},{"name":"Kumartuli","type":"Culture","desc":"Potters' quarter where clay idols for Durga Puja are sculpted by hand."},{"name":"Park Street","type":"Food","desc":"Historic restaurants, Flurys tearoom and the city's best Christmas lights."},{"name":"Indian Museum","type":"Heritage","desc":"India's oldest museum, with Bharhut sculptures and a mummy."}]},{"id":"delhi","name":"New Delhi","country":"India","region":"India","lat":28.61,"lon":77.21,"tz":"Asia/Kolkata","hi":[20,24,30,37,40,39,35,34,34,33,28,22],"lo":[8,11,16,22,26,28,27,27,25,19,13,8],"rain":[20,20,15,10,25,75,210,250,120,15,5,10],"tip":"December and January mornings can be foggy and smoggy; plan monuments for the afternoon.","places":[{"name":"Red Fort","type":"Heritage","desc":"Mughal sandstone citadel; evening sound-and-light show tells its story."},{"name":"Qutub Minar","type":"Heritage","desc":"73 m victory tower from 1193, surrounded by ruins and an iron pillar."},{"name":"Humayun's Tomb","type":"Heritage","desc":"Garden tomb that inspired the Taj Mahal; quietest early morning."},{"name":"Chandni Chowk","type":"Food","desc":"Old Delhi lanes for parathas, jalebis and spice markets by rickshaw."},{"name":"India Gate & Kartavya Path","type":"Landmark","desc":"War memorial on a grand boulevard, lively with families at night."},{"name":"Lotus Temple","type":"Spiritual","desc":"Bahá'í house of worship shaped like a lotus, open to all faiths."},{"name":"Akshardham","type":"Spiritual","desc":"Vast carved temple complex with a fountain show after sunset."}]},{"id":"mumbai","name":"Mumbai","country":"India","region":"India","lat":19.08,"lon":72.88,"tz":"Asia/Kolkata","hi":[31,32,33,33,34,32,30,29,30,33,34,32],"lo":[17,18,21,24,27,26,25,25,24,23,21,19],"rain":[1,1,0,1,15,500,830,530,310,70,15,5],"tip":"Ganesh Chaturthi (Aug or Sep) is spectacular, but monsoon flooding can stop local trains.","places":[{"name":"Gateway of India","type":"Landmark","desc":"1924 arch on the harbour; boats leave here for Elephanta Island."},{"name":"Marine Drive","type":"Viewpoint","desc":"3 km seafront promenade, the 'Queen's Necklace' when lit at night."},{"name":"Elephanta Caves","type":"Heritage","desc":"Rock-cut Shiva temples on an island, an hour by ferry."},{"name":"Chhatrapati Shivaji Terminus","type":"Heritage","desc":"Gothic-revival railway station and UNESCO site, still fully working."},{"name":"Colaba Causeway","type":"Market","desc":"Street shopping, cafés and the Kala Ghoda art district next door."},{"name":"Sanjay Gandhi National Park","type":"Nature","desc":"Forest inside the city with the 2,000-year-old Kanheri Caves."}]},{"id":"goa","name":"Goa","country":"India","region":"India","lat":15.5,"lon":73.83,"tz":"Asia/Kolkata","hi":[32,32,33,33,33,30,29,29,29,32,33,33],"lo":[20,21,23,25,27,25,24,24,24,24,22,21],"rain":[1,0,1,10,100,870,1000,590,270,120,35,10],"tip":"Most beach shacks close from June to September; the monsoon suits waterfall trips instead.","places":[{"name":"Old Goa Churches","type":"Heritage","desc":"Basilica of Bom Jesus and Sé Cathedral, 16th-century Portuguese baroque."},{"name":"Palolem Beach","type":"Beach","desc":"Calm crescent bay in the south, good for kayaking and dolphin trips."},{"name":"Fontainhas, Panaji","type":"Culture","desc":"Latin quarter of pastel houses, tiled lanes and small galleries."},{"name":"Dudhsagar Falls","type":"Nature","desc":"Four-tiered waterfall on the Karnataka border, fullest after monsoon."},{"name":"Anjuna Flea Market","type":"Market","desc":"Wednesday market for crafts and clothes, then sunset at Vagator."},{"name":"Fort Aguada","type":"Viewpoint","desc":"17th-century fort and lighthouse above the Mandovi river mouth."}]},{"id":"jaipur","name":"Jaipur","country":"India","region":"India","lat":26.91,"lon":75.79,"tz":"Asia/Kolkata","hi":[22,26,32,38,41,39,34,32,33,33,29,24],"lo":[8,11,16,22,26,28,26,25,24,19,13,9],"rain":[8,8,5,5,15,60,200,200,80,15,5,5],"tip":"The Jaipur Literature Festival runs in late January, at the coolest time of year.","places":[{"name":"Amber Fort","type":"Heritage","desc":"Hilltop palace of mirrored halls overlooking Maota Lake."},{"name":"Hawa Mahal","type":"Landmark","desc":"Pink honeycomb façade with 953 windows; best photographed at sunrise."},{"name":"City Palace","type":"Heritage","desc":"Royal residence with courtyards, museums and the Peacock Gate."},{"name":"Jantar Mantar","type":"Heritage","desc":"18th-century stone observatory with the world's largest sundial."},{"name":"Nahargarh Fort","type":"Viewpoint","desc":"Ridge-top fort for sunset views across the Pink City."},{"name":"Johari Bazaar","type":"Market","desc":"Jewellery, block-printed textiles and lassi stalls in the old city."}]},{"id":"manali","name":"Manali","country":"India","region":"India","lat":32.24,"lon":77.19,"tz":"Asia/Kolkata","hi":[9,10,15,20,24,27,26,25,24,21,16,12],"lo":[-4,-2,2,6,9,13,16,16,12,6,1,-2],"rain":[70,100,130,80,70,75,200,180,100,30,15,40],"tip":"Rohtang Pass usually opens in May and closes by November; winter is for snow, not sightseeing.","places":[{"name":"Solang Valley","type":"Nature","desc":"Meadows for paragliding in summer and skiing in winter."},{"name":"Hadimba Temple","type":"Spiritual","desc":"Wooden pagoda temple from 1553 in a cedar forest."},{"name":"Old Manali","type":"Culture","desc":"Village lanes of cafés and guesthouses along the Manalsu stream."},{"name":"Rohtang Pass","type":"Viewpoint","desc":"3,978 m pass with snow views; permit needed, open roughly May to Oct."},{"name":"Jogini Falls","type":"Nature","desc":"Easy hike through orchards from Vashisht to a 150 m waterfall."},{"name":"Naggar Castle","type":"Heritage","desc":"Stone-and-timber castle with the Roerich art gallery nearby."}]},{"id":"london","name":"London","country":"United Kingdom","region":"Europe","lat":51.51,"lon":-0.13,"tz":"Europe/London","hi":[8,9,12,15,18,21,23,23,20,16,11,9],"lo":[3,2,4,6,9,12,14,14,12,9,5,3],"rain":[55,40,40,45,50,45,45,50,50,70,60,55],"tip":"Rain is frequent all year but rarely heavy; pack a light layer whatever the month.","places":[{"name":"British Museum","type":"Culture","desc":"Free museum with the Rosetta Stone and Parthenon sculptures."},{"name":"Tower of London","type":"Heritage","desc":"Norman fortress, Crown Jewels and the Beefeater tours."},{"name":"Westminster & Big Ben","type":"Landmark","desc":"Parliament, the Abbey and the river walk to the London Eye."},{"name":"South Bank","type":"Culture","desc":"Tate Modern, Shakespeare's Globe and Borough Market along the Thames."},{"name":"Hyde Park & Kensington","type":"Nature","desc":"Royal park, Kensington Palace and the museum quarter."},{"name":"Camden Market","type":"Market","desc":"Canal-side stalls, street food and live music."}]},{"id":"paris","name":"Paris","country":"France","region":"Europe","lat":48.86,"lon":2.35,"tz":"Europe/Paris","hi":[7,9,13,16,20,23,25,25,21,16,11,8],"lo":[3,3,5,7,11,14,16,16,13,10,6,4],"rain":[50,40,45,45,60,50,60,55,45,60,50,55],"tip":"Many small restaurants close for part of August, when Parisians leave on holiday.","places":[{"name":"Eiffel Tower","type":"Landmark","desc":"Book the summit ahead; it sparkles for five minutes every hour after dark."},{"name":"Louvre","type":"Culture","desc":"The Mona Lisa and 35,000 works; enter by the Carrousel to skip queues."},{"name":"Musée d'Orsay","type":"Culture","desc":"Impressionist masterpieces in a Beaux-Arts railway station."},{"name":"Montmartre & Sacré-Cœur","type":"Viewpoint","desc":"Hilltop artists' quarter with the best free view over Paris."},{"name":"Le Marais","type":"Food","desc":"Medieval lanes, falafel on Rue des Rosiers and Place des Vosges."},{"name":"Seine river cruise","type":"Viewpoint","desc":"An hour past Notre-Dame and the bridges, best at sunset."},{"name":"Versailles","type":"Heritage","desc":"Palace and gardens 40 minutes away; fountains run on summer weekends."}]},{"id":"rome","name":"Rome","country":"Italy","region":"Europe","lat":41.9,"lon":12.5,"tz":"Europe/Rome","hi":[12,14,17,20,24,29,32,32,28,23,17,13],"lo":[3,4,6,9,13,17,19,20,16,12,8,4],"rain":[70,75,60,70,50,35,20,35,75,110,110,80],"tip":"Mid-August (Ferragosto) is hot and many locals are away; spring and early autumn are calmer.","places":[{"name":"Colosseum & Roman Forum","type":"Heritage","desc":"Ancient amphitheatre and civic heart of the empire on one ticket."},{"name":"Vatican Museums & Sistine Chapel","type":"Culture","desc":"Michelangelo's ceiling; book the first entry slot."},{"name":"St Peter's Basilica","type":"Spiritual","desc":"Climb the dome for a view down Via della Conciliazione."},{"name":"Pantheon","type":"Heritage","desc":"2,000-year-old temple with an open oculus; rain falls straight in."},{"name":"Trevi Fountain","type":"Landmark","desc":"Baroque fountain; go early morning to see it without crowds."},{"name":"Trastevere","type":"Food","desc":"Ivy-covered lanes for cacio e pepe and supplì in the evening."}]},{"id":"newyork","name":"New York","country":"United States","region":"Americas","lat":40.71,"lon":-74.01,"tz":"America/New_York","hi":[4,6,10,17,22,27,29,29,25,18,12,6],"lo":[-3,-2,2,8,13,18,21,21,17,11,5,0],"rain":[90,80,110,105,100,105,115,105,100,110,90,100],"tip":"Summer thunderstorms are short; winter can bring snowstorms that close flights.","places":[{"name":"Central Park","type":"Nature","desc":"843 acres of lawns, lakes and Bethesda Terrace; rent a bike."},{"name":"Statue of Liberty & Ellis Island","type":"Landmark","desc":"Ferry from Battery Park; reserve crown access months ahead."},{"name":"The Met","type":"Culture","desc":"5,000 years of art; the rooftop garden opens in summer."},{"name":"Brooklyn Bridge & DUMBO","type":"Viewpoint","desc":"Walk across at sunset, then the waterfront park for skyline views."},{"name":"Times Square & Broadway","type":"Culture","desc":"Neon at night and discount show tickets at the TKTS booth."},{"name":"The High Line","type":"Nature","desc":"Elevated rail-line park ending at Hudson Yards and the Vessel."}]},{"id":"tokyo","name":"Tokyo","country":"Japan","region":"Asia","lat":35.68,"lon":139.69,"tz":"Asia/Tokyo","hi":[10,10,14,19,23,26,30,31,27,22,17,12],"lo":[1,2,5,10,15,19,23,24,21,15,9,4],"rain":[55,55,115,130,140,170,155,170,210,200,95,55],"tip":"Cherry blossom peaks in late March or early April; typhoons are most likely in September.","places":[{"name":"Senso-ji, Asakusa","type":"Spiritual","desc":"Tokyo's oldest temple, reached through the Nakamise shopping street."},{"name":"Shibuya Crossing","type":"Landmark","desc":"The famous scramble; watch it from the Shibuya Sky deck."},{"name":"Meiji Shrine","type":"Spiritual","desc":"Forest shrine beside Harajuku and Yoyogi Park."},{"name":"Shinjuku Gyoen","type":"Nature","desc":"Garden with over 1,000 cherry trees and autumn maples."},{"name":"Tsukiji Outer Market","type":"Food","desc":"Sushi breakfasts, tamagoyaki and knife shops."},{"name":"teamLab Planets","type":"Culture","desc":"Immersive digital art rooms where you walk through water."}]},{"id":"dubai","name":"Dubai","country":"United Arab Emirates","region":"Middle East","lat":25.2,"lon":55.27,"tz":"Asia/Dubai","hi":[24,25,29,33,38,40,41,41,39,35,30,26],"lo":[14,15,18,21,25,28,30,30,27,24,19,16],"rain":[15,25,20,7,0,0,0,0,0,1,3,15],"tip":"Summer is cheap but outdoor time is limited to early morning and after dark.","places":[{"name":"Burj Khalifa","type":"Viewpoint","desc":"Observation decks on the 124th and 148th floors; book for sunset."},{"name":"Dubai Creek & Al Fahidi","type":"Heritage","desc":"Abra boat ride to the spice and gold souks and wind-tower houses."},{"name":"Desert safari","type":"Nature","desc":"Dune drive, camel ride and dinner under the stars."},{"name":"Museum of the Future","type":"Culture","desc":"Torus-shaped building with immersive exhibits on future life."},{"name":"Jumeirah Beach","type":"Beach","desc":"Free public beach with a view of the Burj Al Arab."},{"name":"Dubai Fountain","type":"Landmark","desc":"Evening shows every 30 minutes at the foot of the Burj Khalifa."}]},{"id":"singapore","name":"Singapore","country":"Singapore","region":"Asia","lat":1.35,"lon":103.82,"tz":"Asia/Singapore","hi":[30,31,32,32,32,31,31,31,31,31,31,30],"lo":[23,24,24,25,25,25,25,25,25,24,24,23],"rain":[240,110,170,160,170,135,150,150,135,155,255,290],"tip":"It is warm and humid all year; afternoon downpours are short, so plan indoor stops around 3 pm.","places":[{"name":"Gardens by the Bay","type":"Nature","desc":"Supertree Grove light show and the Cloud Forest dome."},{"name":"Marina Bay Sands","type":"Viewpoint","desc":"SkyPark deck over the bay and the Spectra laser show."},{"name":"Chinatown & Maxwell Food Centre","type":"Food","desc":"Hainanese chicken rice and the Buddha Tooth Relic Temple."},{"name":"Sentosa","type":"Beach","desc":"Beaches, Universal Studios and cable cars from Mount Faber."},{"name":"Little India","type":"Culture","desc":"Sri Veeramakaliamman Temple, Tekka Centre and colourful shophouses."},{"name":"Singapore Botanic Gardens","type":"Nature","desc":"UNESCO garden with the National Orchid Garden."}]},{"id":"bangkok","name":"Bangkok","country":"Thailand","region":"Asia","lat":13.76,"lon":100.5,"tz":"Asia/Bangkok","hi":[32,33,34,35,34,33,33,32,32,32,32,31],"lo":[22,24,26,27,27,26,26,26,25,25,24,22],"rain":[15,25,40,80,220,150,160,200,320,240,50,10],"tip":"Songkran (mid-April) is a citywide water fight at the hottest time of year.","places":[{"name":"Grand Palace & Wat Phra Kaew","type":"Heritage","desc":"Royal complex housing the Emerald Buddha; dress code applies."},{"name":"Wat Arun","type":"Spiritual","desc":"Porcelain-studded riverside temple, best across the river at sunset."},{"name":"Wat Pho","type":"Spiritual","desc":"46 m reclining Buddha and the traditional Thai massage school."},{"name":"Chatuchak Weekend Market","type":"Market","desc":"15,000 stalls; go early before the heat."},{"name":"Chao Phraya river boat","type":"Viewpoint","desc":"Cheap orange-flag ferry linking the main riverside sights."},{"name":"Yaowarat (Chinatown)","type":"Food","desc":"Neon street-food strip at night: seafood, noodles, mango sticky rice."}]},{"id":"bali","name":"Bali","country":"Indonesia","region":"Asia","lat":-8.65,"lon":115.22,"tz":"Asia/Makassar","hi":[31,31,31,31,31,30,29,30,30,31,31,31],"lo":[24,24,24,24,24,23,23,23,23,24,24,24],"rain":[345,275,235,90,95,60,55,30,45,90,180,285],"tip":"Nyepi, the Day of Silence in March, shuts the whole island including the airport for 24 hours.","places":[{"name":"Ubud & Monkey Forest","type":"Culture","desc":"Art town with dance shows, a palace and macaques in a temple forest."},{"name":"Tegallalang Rice Terraces","type":"Nature","desc":"Stepped paddies north of Ubud; visit before 9 am."},{"name":"Uluwatu Temple","type":"Spiritual","desc":"Clifftop temple with a Kecak fire dance at sunset."},{"name":"Tanah Lot","type":"Spiritual","desc":"Sea temple on a rock, cut off at high tide."},{"name":"Mount Batur sunrise","type":"Nature","desc":"Pre-dawn hike up an active volcano for sunrise over the caldera."},{"name":"Nusa Penida","type":"Beach","desc":"Day trip to Kelingking cliff and manta ray snorkelling."}]},{"id":"sydney","name":"Sydney","country":"Australia","region":"Oceania","lat":-33.87,"lon":151.21,"tz":"Australia/Sydney","hi":[26,26,25,22,20,17,17,18,20,22,24,25],"lo":[19,19,18,15,12,9,8,9,11,14,16,18],"rain":[100,120,130,125,120,130,100,80,70,75,85,80],"tip":"Seasons are reversed: December to February is summer, and Vivid Sydney lights up the city in late May.","places":[{"name":"Sydney Opera House","type":"Landmark","desc":"Take the backstage tour or catch a show under the sails."},{"name":"Harbour Bridge climb","type":"Viewpoint","desc":"Climb the arch, or walk the deck for free."},{"name":"Bondi to Coogee walk","type":"Beach","desc":"6 km clifftop coastal path past ocean pools."},{"name":"The Rocks","type":"Heritage","desc":"Convict-era lanes, pubs and a weekend market."},{"name":"Royal Botanic Garden","type":"Nature","desc":"Harbourside garden ending at Mrs Macquarie's Chair."},{"name":"Blue Mountains","type":"Nature","desc":"Day trip to the Three Sisters and eucalyptus valleys."}]},{"id":"capetown","name":"Cape Town","country":"South Africa","region":"Africa","lat":-33.92,"lon":18.42,"tz":"Africa/Johannesburg","hi":[26,27,25,23,20,18,18,18,19,21,24,25],"lo":[16,16,14,12,10,8,7,8,9,11,13,15],"rain":[15,15,20,40,70,95,85,75,40,30,15,15],"tip":"Summer brings the strong south-easterly 'Cape Doctor' wind; check the cable car before going up.","places":[{"name":"Table Mountain","type":"Viewpoint","desc":"Cable car or a hike up Platteklip Gorge to the flat summit."},{"name":"Cape of Good Hope","type":"Nature","desc":"Scenic drive via Chapman's Peak to the peninsula's tip."},{"name":"Boulders Beach","type":"Beach","desc":"Swim near a colony of African penguins in Simon's Town."},{"name":"Robben Island","type":"Heritage","desc":"Ferry to the prison where Nelson Mandela was held."},{"name":"Bo-Kaap","type":"Culture","desc":"Bright Cape Malay houses and cooking classes."},{"name":"Kirstenbosch Garden","type":"Nature","desc":"Botanical garden with a treetop walkway on the mountain's slopes."},{"name":"V&A Waterfront","type":"Food","desc":"Harbour food market, Zeitz MOCAA gallery and boat trips."}]}]}</script>
+<script>
+(() => {
+"use strict";
+const DATA = JSON.parse(document.getElementById('city-data').textContent);
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MS = MONTHS.map(m => m.slice(0,3));
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const round = n => Math.round(n);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- icons ---------- */
+const SUN = '#ffc35a', CLOUD = '#e6edf5', CLOUD_D = '#9fb0c2', DROP = '#7fd3ff', BOLT = '#ffe066';
+function icon(name){
+  const cloud = (fill, dy=0) => `<path d="M16 ${36+dy}h22a8 8 0 0 0 0-16 11 11 0 0 0-21-3 8 8 0 0 0-1 19z" fill="${fill}"/>`;
+  const sun = (cx=24,cy=24,r=8) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${SUN}"/>` +
+    Array.from({length:8},(_,i)=>{const a=i*Math.PI/4, x1=cx+Math.cos(a)*(r+4), y1=cy+Math.sin(a)*(r+4), x2=cx+Math.cos(a)*(r+8), y2=cy+Math.sin(a)*(r+8);
+      return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${SUN}" stroke-width="2.5" stroke-linecap="round"/>`;}).join('');
+  const drops = n => Array.from({length:n},(_,i)=>`<line x1="${18+i*7}" y1="39" x2="${15+i*7}" y2="46" stroke="${DROP}" stroke-width="2.5" stroke-linecap="round"/>`).join('');
+  const body = {
+    clear: sun(),
+    night: `<path d="M30 10a14 14 0 1 0 10 22 12 12 0 0 1-10-22z" fill="#dfe6ff"/>`,
+    partly: sun(18,18,6) + cloud(CLOUD, 4),
+    cloudy: `<g opacity=".8">${cloud(CLOUD_D,-6)}</g>` + cloud(CLOUD, 2),
+    fog: cloud(CLOUD_D,-6) + [32,38,44].map((y,i)=>`<line x1="${8+i*3}" y1="${y}" x2="${42-i*2}" y2="${y}" stroke="${CLOUD}" stroke-width="2.5" stroke-linecap="round"/>`).join(''),
+    rain: cloud(CLOUD_D,-4) + drops(3),
+    storm: cloud('#7d8ea3',-4) + `<path d="M26 32l-5 9h5l-3 7 9-11h-5l3-5z" fill="${BOLT}"/>`,
+    snow: cloud(CLOUD,-4) + [[18,40],[26,44],[34,40]].map(([x,y])=>`<g stroke="#fff" stroke-width="1.8" stroke-linecap="round"><line x1="${x-3}" y1="${y}" x2="${x+3}" y2="${y}"/><line x1="${x}" y1="${y-3}" x2="${x}" y2="${y+3}"/></g>`).join(''),
+    summer: sun(24,24,9),
+    winter: `<g stroke="#bfe6ff" stroke-width="2.5" stroke-linecap="round">${[0,60,120].map(a=>`<g transform="rotate(${a} 24 24)"><line x1="24" y1="6" x2="24" y2="42"/><polyline points="19,10 24,14 29,10" fill="none"/><polyline points="19,38 24,34 29,38" fill="none"/></g>`).join('')}</g>`,
+    rainy: `<path d="M8 24a16 16 0 0 1 32 0z" fill="#7fb6ff"/><line x1="24" y1="24" x2="24" y2="38" stroke="#dfe6f0" stroke-width="2.5"/><path d="M24 38a3 3 0 0 1-6 0" fill="none" stroke="#dfe6f0" stroke-width="2.5" stroke-linecap="round"/>` + `<line x1="12" y1="30" x2="10" y2="35" stroke="${DROP}" stroke-width="2" stroke-linecap="round"/><line x1="36" y1="30" x2="34" y2="35" stroke="${DROP}" stroke-width="2" stroke-linecap="round"/>`,
+    spring: [0,72,144,216,288].map(a=>`<ellipse cx="24" cy="14" rx="6" ry="9" fill="#ffb3cf" transform="rotate(${a} 24 24)"/>`).join('') + `<circle cx="24" cy="24" r="4.5" fill="${SUN}"/>`,
+    autumn: `<path d="M24 6c8 6 14 12 14 20a14 14 0 0 1-28 0c0-8 6-14 14-20z" fill="#ff9a4d"/><path d="M24 12v30M24 22l6-5M24 30l-6-5" stroke="#8a3d12" stroke-width="2" stroke-linecap="round" fill="none"/>`,
+    dry: sun(16,16,6) + cloud(CLOUD, 6),
+  }[name] || '';
+  return `<svg viewBox="0 0 48 48" aria-hidden="true">${body}</svg>`;
+}
+
+/* ---------- climate rules (mirrored in backend/skycast/analysis.py) ---------- */
+const SEASONS = {
+  summer:{label:'Summer', icon:'summer'}, hot:{label:'Hot summer', icon:'summer'},
+  winter:{label:'Winter', icon:'winter'}, rainy:{label:'Rainy season', icon:'rainy'},
+  spring:{label:'Spring', icon:'spring'}, autumn:{label:'Autumn', icon:'autumn'},
+  dry:{label:'Dry season', icon:'dry'}, cool:{label:'Cool season', icon:'winter'}
+};
+function seasonOf(hi, lo, rain, lat, m){
+  const mean = (hi+lo)/2;
+  if (rain >= 150) return 'rainy';
+  if (mean >= 29) return 'hot';
+  if (Math.abs(lat) >= 20){
+    if (hi <= 12 || lo <= 2) return 'winter';
+    const mm = lat >= 0 ? m : (m+6)%12;           // flip seasons in the southern hemisphere
+    if (mm <= 1 || mm === 11) return 'winter';
+    if (mm <= 4) return 'spring';
+    if (mm <= 7) return 'summer';
+    return 'autumn';
+  }
+  if (lo <= 18) return 'cool';
+  return 'dry';
+}
+function comfort(hi, lo, rain){
+  let s = 100;
+  s -= Math.max(0, 20-hi)*4 + Math.max(0, hi-28)*5;
+  s -= Math.max(0, 5-lo)*2;
+  s -= Math.min(45, rain/10*1.2);
+  if (lo >= 24) s -= 6;
+  return Math.max(0, Math.min(100, round(s)));
+}
+function analyse(c){
+  const scores = c.hi.map((h,m)=>comfort(h, c.lo[m], c.rain[m]));
+  const max = Math.max(...scores);
+  const best = scores.map((s,m)=>[s,m]).filter(([s])=>s >= max-14 && s >= 45)
+    .sort((a,b)=>b[0]-a[0]).slice(0,5).map(([,m])=>m).sort((a,b)=>a-b);
+  if (!best.length) best.push(scores.indexOf(max));
+  const ratings = scores.map((s,m)=> best.includes(m) ? 'best' : s>=65 ? 'good' : s>=45 ? 'fair' : 'poor');
+  const seasons = c.hi.map((h,m)=>seasonOf(h, c.lo[m], c.rain[m], c.lat, m));
+  return {scores, best, ratings, seasons};
+}
+function rainWords(r){
+  if (r < 15) return 'almost no rain';
+  if (r < 50) return `very little rain (about ${round(r)} mm)`;
+  if (r < 100) return `a few showers (about ${round(r)} mm)`;
+  return `some rain (about ${round(r)} mm)`;
+}
+function problems(hi, lo, rain){
+  const out = [];
+  if (rain >= 300) out.push(`Very heavy rain, about ${round(rain)} mm in the month, floods streets and disrupts travel`);
+  else if (rain >= 150) out.push(`Frequent heavy downpours, about ${round(rain)} mm, interrupt sightseeing`);
+  else if (rain >= 90 && hi < 26) out.push(`Damp, with about ${round(rain)} mm of rain spread over many days`);
+  if (hi >= 38) out.push(`Extreme heat, highs near ${round(hi)}°C, makes daytime outings exhausting`);
+  else if (hi >= 33) out.push(`Hot afternoons with highs around ${round(hi)}°C`);
+  if (lo >= 25 && hi >= 30) out.push('Humid nights that barely cool down');
+  if (hi <= 5) out.push(`Freezing, with highs of only ${round(hi)}°C and ice or snow likely`);
+  else if (hi <= 12) out.push(`Cold, with highs around ${round(hi)}°C and short days`);
+  else if (lo <= 2) out.push(`Frosty nights around ${round(lo)}°C`);
+  return out;
+}
+function monthReason(c, a, m){
+  const hi=c.hi[m], lo=c.lo[m], rain=c.rain[m];
+  const p = problems(hi, lo, rain);
+  if (a.ratings[m] === 'best') return `Highs near ${round(hi)}°C, lows near ${round(lo)}°C and ${rainWords(rain)}.`;
+  if (!p.length) return `Comfortable, with highs near ${round(hi)}°C and ${rainWords(rain)}. A good alternative to the peak months.`;
+  return p.join('. ') + '.';
+}
+function rangeText(ms){
+  const set = new Set(ms);
+  if (!set.size) return '';
+  if (set.size === 12) return 'All year';
+  const runs = [];
+  for (let m=0; m<12; m++){
+    if (!set.has(m) || set.has((m+11)%12)) continue;      // m starts a run
+    let e = m; while (set.has((e+1)%12)) e = (e+1)%12;
+    runs.push(e === m ? MONTHS[m] : `${MS[m]} – ${MS[e]}`);
+  }
+  return runs.join(' and ');
+}
+function bestWhy(c, a){
+  const b = a.best;
+  const avg = arr => b.reduce((s,m)=>s+arr[m],0)/b.length;
+  const hi = avg(c.hi), lo = avg(c.lo), rain = avg(c.rain);
+  const worst = a.scores.indexOf(Math.min(...a.scores));
+  const worstWhy = problems(c.hi[worst], c.lo[worst], c.rain[worst])[0];
+  return `${rangeText(b)} ${b.length>1?'bring':'brings'} the most comfortable weather in ${c.name}: days around ${round(hi)}°C, nights around ${round(lo)}°C and ${rainWords(rain)}. ` +
+    `That is ideal for walking between sights. ${MONTHS[worst]} is the hardest month to visit` + (worstWhy ? `: ${worstWhy.charAt(0).toLowerCase() + worstWhy.slice(1)}.` : '.');
+}
+
+/* ---------- daily series ---------- */
+function hashStr(s){ let h=2166136261; for (const ch of s){ h^=ch.charCodeAt(0); h=Math.imul(h,16777619);} return h>>>0; }
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed>>>15, 1|seed); t = t + Math.imul(t ^ t>>>7, 61|t) ^ t; return ((t ^ t>>>14)>>>0)/4294967296; }; }
+const daysIn = (y,m) => new Date(y, m+1, 0).getDate();
+function climateAt(arr, m, frac){           // frac: 0..1 position in month; cosine blend between month centres
+  const pos = m + frac - 0.5;
+  const a = Math.floor(pos), t = pos - a;
+  const w = (1 - Math.cos(t*Math.PI))/2;
+  return arr[(a+12)%12]*(1-w) + arr[(a+13)%12]*w;
+}
+function typicalDays(c, m, year){
+  const n = daysIn(year, m), r = rng(hashStr(c.id + ':' + m));
+  const rain = c.rain[m], pRain = Math.min(.85, Math.max(.03, rain/350));
+  let nh = 0, nl = 0; const out = [];
+  for (let d=1; d<=n; d++){
+    const f = (d-.5)/n;
+    nh = .6*nh + (r()*3-1.5); nl = .6*nl + (r()*2.4-1.2);
+    let hi = climateAt(c.hi, m, f) + nh, lo = climateAt(c.lo, m, f) + nl;
+    const wet = r() < pRain, cl = r();
+    let code;
+    if (wet){ hi -= 1.5; code = lo <= 0 ? 'snow' : (hi >= 28 && rain >= 150 && cl < .3) ? 'storm' : 'rain'; }
+    else if (lo <= 8 && rain < 80 && cl < .12) code = 'fog';
+    else code = cl < .25 + pRain*.5 ? (cl < .1 + pRain*.3 ? 'cloudy' : 'partly') : 'clear';
+    out.push({day:d, hi:+hi.toFixed(1), lo:+Math.min(lo, hi-2).toFixed(1), code, source:'typical'});
+  }
+  return out;
+}
+const COND = {clear:'Clear sky', partly:'Partly cloudy', cloudy:'Overcast', fog:'Fog', rain:'Rain', storm:'Thunderstorm', snow:'Snow'};
+function wmo(code){
+  if (code <= 1) return 'clear'; if (code === 2) return 'partly'; if (code === 3) return 'cloudy';
+  if (code === 45 || code === 48) return 'fog';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  if (code >= 95) return 'storm';
+  return 'rain';
+}
+
+/* ---------- animated sky ---------- */
+const Sky = (() => {
+  const cv = $('sky'), ctx = cv.getContext('2d');
+  let W=0, H=0, dpr=1, t=0, flash=0, bolt=null;
+  const P = {
+    clear:{day:[[47,127,216],[124,190,240],[253,226,170]], night:[[6,11,31],[20,34,74],[48,58,107]]},
+    partly:{day:[[64,130,200],[140,184,224],[236,224,196]], night:[[10,16,36],[28,40,74],[56,64,100]]},
+    cloudy:{day:[[93,113,134],[150,166,180],[200,207,212]], night:[[16,20,30],[34,40,54],[58,64,78]]},
+    fog:{day:[[141,152,163],[185,194,200],[220,224,226]], night:[[30,34,42],[52,58,66],[80,86,92]]},
+    rain:{day:[[52,71,92],[95,116,135],[138,154,166]], night:[[10,14,24],[24,32,46],[44,52,66]]},
+    storm:{day:[[26,34,48],[50,63,82],[76,88,103]], night:[[6,8,14],[16,20,30],[30,36,48]]},
+    snow:{day:[[143,167,194],[196,211,226],[238,243,248]], night:[[22,30,52],[50,62,92],[96,110,140]]}
+  };
+  const FX = { // sun, clouds, cloudDark, rain, snow, storm, fog, heat
+    clear:[1,.08,0,0,0,0,0], partly:[1,.55,.1,0,0,0,0], cloudy:[.15,1,.45,0,0,0,.1], fog:[.1,.5,.2,0,0,0,1],
+    rain:[0,1,.7,.75,0,0,.15], storm:[0,1,1,1,0,1,.1], snow:[0,.9,.3,0,1,0,.2]
+  };
+  const keys = ['sun','clouds','dark','rain','snow','storm','fog'];
+  const cur = {top:[47,127,216], mid:[124,190,240], bot:[253,226,170], night:0}, tgt = {...cur};
+  keys.forEach(k => { cur[k]=0; tgt[k]=0; });
+  const stars = Array.from({length:140},()=>({x:Math.random(),y:Math.random()*.6,r:Math.random()*1.3+.2,p:Math.random()*6}));
+  const clouds = Array.from({length:11},(_,i)=>({x:Math.random(),y:.04+Math.random()*.36,s:.6+Math.random()*1.1,v:.00004+Math.random()*.00008,seed:i}));
+  const drops = Array.from({length:420},()=>({x:Math.random(),y:Math.random(),l:.6+Math.random()*.6,v:.9+Math.random()*.5}));
+  const flakes = Array.from({length:260},()=>({x:Math.random(),y:Math.random(),r:1+Math.random()*2.4,v:.25+Math.random()*.5,p:Math.random()*6}));
+  const hills = [0,1,2].map(i => { const r = rng(91+i*7); return Array.from({length:9},()=>r()); });
+  const towers = (() => { const r = rng(4242); const a=[]; let x=0; while (x<1){ const w=.02+r()*.035; a.push({x,w,h:.06+r()*.2,win:r()}); x+=w+.004+r()*.01; } return a; })();
+
+  function resize(){ dpr = Math.min(2, devicePixelRatio||1); W = innerWidth; H = innerHeight; cv.width = W*dpr; cv.height = H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); if (reduceMotion) draw(true); }
+  const lerp = (a,b,k) => a+(b-a)*k;
+  const rgb = (c,a=1) => `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${a})`;
+  const mix = (a,b,k) => a.map((v,i)=>lerp(v,b[i],k));
+
+  function set(kind, isDay, intensity=1){
+    const pal = (P[kind]||P.clear)[isDay ? 'day' : 'night'];
+    tgt.top = pal[0]; tgt.mid = pal[1]; tgt.bot = pal[2]; tgt.night = isDay ? 0 : 1;
+    (FX[kind]||FX.clear).forEach((v,i) => tgt[keys[i]] = keys[i]==='rain' ? v*intensity : v);
+    if (reduceMotion){ Object.assign(cur, JSON.parse(JSON.stringify(tgt))); draw(true); }
+  }
+  function cloud(x, y, s, col, a){
+    ctx.fillStyle = rgb(col, a);
+    ctx.beginPath();
+    [[0,0,42],[38,-14,34],[70,4,38],[30,14,36],[-30,10,28],[100,14,24]].forEach(([dx,dy,r]) => { ctx.moveTo(x+dx*s+r*s, y+dy*s); ctx.arc(x+dx*s, y+dy*s, r*s, 0, Math.PI*2); });
+    ctx.fill();
+  }
+  function hillPath(pts, base, amp){
+    ctx.beginPath(); ctx.moveTo(0, H);
+    for (let i=0;i<=80;i++){ const f=i/80, p=f*(pts.length-1), a=Math.floor(p), k=p-a, b=Math.min(pts.length-1,a+1);
+      const v = lerp(pts[a], pts[b], (1-Math.cos(k*Math.PI))/2); ctx.lineTo(f*W, H*(base - v*amp)); }
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+  }
+  function draw(still){
+    const k = still ? 1 : .03;
+    ['top','mid','bot'].forEach(c => cur[c] = mix(cur[c], tgt[c], k));
+    ['night',...keys].forEach(c => cur[c] = lerp(cur[c], tgt[c], k));
+    t += 1;
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0, rgb(cur.top)); g.addColorStop(.55, rgb(cur.mid)); g.addColorStop(1, rgb(cur.bot));
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+    // stars and moon at night
+    const starA = cur.night * (1 - Math.min(1, cur.clouds*.9));
+    if (starA > .02) stars.forEach(s => { ctx.fillStyle = `rgba(255,255,255,${starA*(.5+.5*Math.sin(t*.03+s.p))})`; ctx.fillRect(s.x*W, s.y*H, s.r, s.r); });
+    const cx = W*.8, cy = H*.2, R = Math.max(26, Math.min(W,H)*.06);
+    const sunA = cur.sun*(1-cur.night), moonA = cur.night*Math.max(.25, 1-cur.dark);
+    if (sunA > .02){
+      const halo = ctx.createRadialGradient(cx,cy,R*.4,cx,cy,R*5);
+      halo.addColorStop(0, `rgba(255,214,120,${.55*sunA})`); halo.addColorStop(1,'rgba(255,214,120,0)');
+      ctx.fillStyle = halo; ctx.fillRect(0,0,W,H);
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(t*.0015);
+      ctx.strokeStyle = `rgba(255,220,140,${.35*sunA})`; ctx.lineWidth = 2;
+      for (let i=0;i<12;i++){ ctx.rotate(Math.PI/6); ctx.beginPath(); ctx.moveTo(R*1.35,0); ctx.lineTo(R*(1.8+.15*Math.sin(t*.04+i)),0); ctx.stroke(); }
+      ctx.restore();
+      ctx.fillStyle = `rgba(255,206,102,${sunA})`; ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fill();
+    }
+    if (moonA > .02){
+      ctx.fillStyle = `rgba(232,236,255,${moonA})`; ctx.beginPath(); ctx.arc(cx,cy,R*.8,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = rgb(cur.top, moonA); ctx.beginPath(); ctx.arc(cx+R*.35,cy-R*.2,R*.7,0,Math.PI*2); ctx.fill();
+    }
+    // clouds
+    const cBase = mix([255,255,255], [70,80,96], cur.dark); const cNight = mix(cBase, [60,68,88], cur.night*.7);
+    clouds.forEach((c,i) => {
+      if (!still) c.x += c.v * (1 + cur.storm*2);
+      if (c.x > 1.25) c.x = -.3;
+      const show = Math.min(1, Math.max(0, cur.clouds*11 - i));
+      if (show > .01) cloud(c.x*W, c.y*H, c.s*Math.max(.7, W/1400), cNight, .78*show);
+    });
+    // landscape: three ridges and a skyline
+    const ground = mix(cur.bot, [10,16,28], .72 + cur.night*.15);
+    ctx.fillStyle = rgb(mix(cur.mid, ground, .45)); hillPath(hills[0], .8, .16);
+    ctx.fillStyle = rgb(mix(cur.mid, ground, .7));
+    towers.forEach(b => { const h = b.h*H*.9, x=b.x*W, w=b.w*W; ctx.fillRect(x, H*.86-h, w, h+H*.14); });
+    if (cur.night > .3){
+      ctx.fillStyle = `rgba(255,214,140,${.55*cur.night})`;
+      towers.forEach((b,bi) => { const h=b.h*H*.9, x=b.x*W, w=b.w*W, r=rng(bi*97+7);
+        for (let yy=H*.86-h+8; yy<H*.86; yy+=12) for (let xx=x+4; xx<x+w-4; xx+=8) if (r()<.32) ctx.fillRect(xx,yy,3,4); });
+    }
+    ctx.fillStyle = rgb(mix(cur.mid, ground, .88)); hillPath(hills[1], .9, .08);
+    ctx.fillStyle = rgb(ground); hillPath(hills[2], .97, .05);
+    // fog bands
+    if (cur.fog > .02) for (let i=0;i<4;i++){
+      const y = H*(.55+i*.1), off = Math.sin(t*.004+i)*60;
+      const fg = ctx.createLinearGradient(0,y-60,0,y+60);
+      fg.addColorStop(0,'rgba(230,234,238,0)'); fg.addColorStop(.5,`rgba(230,234,238,${.38*cur.fog})`); fg.addColorStop(1,'rgba(230,234,238,0)');
+      ctx.fillStyle = fg; ctx.fillRect(off-80, y-60, W+160, 120);
+    }
+    // rain
+    const nDrops = Math.floor(drops.length*cur.rain);
+    if (nDrops){ ctx.strokeStyle = `rgba(200,220,240,${.35+.25*cur.rain})`; ctx.lineWidth = 1.2; ctx.beginPath();
+      const slant = 3 + cur.storm*5;
+      for (let i=0;i<nDrops;i++){ const d=drops[i]; if (!still){ d.y += d.v*.018; d.x += slant*.00004; if (d.y>1){ d.y=-.05; d.x=Math.random(); } }
+        const x=d.x*W, y=d.y*H, l=18*d.l; ctx.moveTo(x,y); ctx.lineTo(x-slant, y+l); }
+      ctx.stroke(); }
+    // snow
+    const nFl = Math.floor(flakes.length*cur.snow);
+    if (nFl){ ctx.fillStyle = 'rgba(255,255,255,.9)';
+      for (let i=0;i<nFl;i++){ const f=flakes[i]; if (!still){ f.y += f.v*.003; f.x += Math.sin(t*.01+f.p)*.0004; if (f.y>1){ f.y=-.02; f.x=Math.random(); } }
+        ctx.beginPath(); ctx.arc(f.x*W, f.y*H, f.r, 0, Math.PI*2); ctx.fill(); } }
+    // lightning
+    if (!still && cur.storm > .6 && Math.random() < .006){ flash = 1; bolt = (() => { const pts=[[W*(.2+Math.random()*.6), 0]]; while (pts[pts.length-1][1] < H*.6) { const [x,y]=pts[pts.length-1]; pts.push([x+(Math.random()-.5)*70, y+30+Math.random()*40]); } return pts; })(); }
+    if (flash > .02){
+      ctx.fillStyle = `rgba(230,236,255,${flash*.35})`; ctx.fillRect(0,0,W,H);
+      if (bolt && flash > .5){ ctx.strokeStyle = `rgba(255,255,240,${flash})`; ctx.lineWidth = 2.5; ctx.beginPath(); bolt.forEach(([x,y],i)=> i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.stroke(); }
+      flash *= .9;
+    }
+  }
+  function loop(){ draw(false); requestAnimationFrame(loop); }
+  addEventListener('resize', resize); resize();
+  if (!reduceMotion) requestAnimationFrame(loop); else draw(true);
+  return {set};
+})();
+
+/* ---------- state ---------- */
+const now = new Date();
+const state = { city:null, month: now.getMonth(), year: now.getFullYear(), backend:false, live:null, analysis:null, days:[], scene:null };
+
+function localParts(tz){
+  try {
+    const f = new Intl.DateTimeFormat('en-GB',{timeZone:tz, weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit', hour12:false});
+    const parts = Object.fromEntries(f.formatToParts(new Date()).map(p=>[p.type,p.value]));
+    return {label:`${parts.weekday}, ${parts.day} ${parts.month} · ${parts.hour}:${parts.minute} local time`, hour:+parts.hour};
+  } catch { return {label: now.toDateString(), hour: now.getHours()}; }
+}
+
+/* ---------- rendering ---------- */
+function renderToday(){
+  const c = state.city, lp = localParts(c.tz || 'UTC'), live = state.live;
+  $('cityName').textContent = c.name;
+  $('cityMeta').textContent = `${c.country ? c.country + ' · ' : ''}${lp.label}`;
+  let temp, feels, code, hi, lo, hum, wind, rainTxt, isDay, note;
+  if (live && live.current){
+    const cu = live.current; temp = cu.temp; feels = cu.feels; code = wmo(cu.code); isDay = !!cu.is_day;
+    hi = cu.hi; lo = cu.lo; hum = cu.humidity + '%'; wind = round(cu.wind) + ' km/h'; rainTxt = (cu.precip ?? 0).toFixed(1) + ' mm';
+    note = `Live conditions from Open-Meteo${live.via ? ' via ' + live.via : ''}.`;
+  } else {
+    const m = now.getMonth(), f = (now.getDate()-.5)/daysIn(now.getFullYear(), m);
+    hi = climateAt(c.hi, m, f); lo = climateAt(c.lo, m, f);
+    isDay = lp.hour >= 6 && lp.hour < 18;
+    const h = lp.hour; const dayFrac = isDay ? Math.sin(Math.PI*(h-6)/12) : 0;
+    temp = lo + (hi-lo)*(isDay ? .35+.65*dayFrac : .15);
+    const td = typicalDays(c, m, now.getFullYear())[now.getDate()-1]; code = td ? td.code : 'clear';
+    feels = temp + (temp > 26 && c.lo[m] >= 22 ? 3 : 0);
+    hum = '—'; wind = '—'; rainTxt = round(c.rain[m]) + ' mm/mo';
+    note = c.estimated === 'claude'
+      ? `Live weather can't be reached from this preview, so this is a typical day for the date. Climate averages for ${c.name} were estimated by Claude; run the Skycast backend for measured data.`
+      : 'Live weather is unavailable here, so this is a typical day for this date from climate averages. Run the Skycast backend for live conditions.';
+  }
+  $('nowTemp').innerHTML = `${round(temp)}<sup>°C</sup>`;
+  $('nowIcon').innerHTML = icon(code === 'clear' && !isDay ? 'night' : code);
+  $('nowCond').textContent = COND[code] + (live && live.current ? '' : ' (typical)');
+  $('nowHiLo').textContent = `High ${round(hi)}° · Low ${round(lo)}°`;
+  $('nowStats').innerHTML = [['Feels like', round(feels)+'°C'], ['Humidity', hum], ['Wind', wind], [live&&live.current ? 'Rain today' : 'Rain this month', rainTxt]]
+    .map(([k,v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
+  $('nowNote').textContent = note;
+  const wk = $('week');
+  if (live && live.forecast && live.forecast.length){
+    wk.hidden = false;
+    wk.innerHTML = live.forecast.slice(0,7).map(d => { const dt = new Date(d.date+'T12:00:00');
+      return `<div><span class="muted">${dt.toLocaleDateString('en-GB',{weekday:'short'})}</span>${icon(wmo(d.code))}<b>${round(d.hi)}°</b> <em>${round(d.lo)}°</em></div>`; }).join('');
+  } else wk.hidden = true;
+  state.today = {code, isDay, label: `${COND[code]} · today in ${c.name}`};
+  setScene(state.today, false);
+}
+
+function setScene(sc, picked){
+  const intensity = sc.code === 'storm' ? 1 : sc.code === 'rain' ? .8 : 1;
+  Sky.set(sc.code, sc.isDay, intensity);
+  $('sceneText').textContent = sc.label;
+  $('sceneReset').hidden = !picked;
+}
+
+function renderMonths(){
+  const c = state.city, a = state.analysis;
+  $('months').innerHTML = MS.map((m,i) => `<button type="button" class="mbtn${a.ratings[i]==='best'?' best':''}" data-m="${i}" aria-pressed="${i===state.month}" title="${MONTHS[i]}: ${SEASONS[a.seasons[i]].label}">${icon(SEASONS[a.seasons[i]].icon)}<span>${m}</span><small>${round(c.hi[i])}°</small></button>`).join('');
+  const used = [...new Set(a.seasons)];
+  $('legend').innerHTML = used.map(s => `<span>${icon(SEASONS[s].icon)}${SEASONS[s].label}</span>`).join('');
+}
+
+function monthDays(){
+  const c = state.city, m = state.month;
+  let days = c.monthDays && c.monthDays[m] && c.monthDays[m].length ? c.monthDays[m].map(d => ({...d})) : typicalDays(c, m, state.year);
+  if (!days[0].code){ const t = typicalDays(c, m, state.year); days.forEach((d,i) => d.code = (t[i]||t[t.length-1]).code); }
+  const fc = state.live && state.live.forecast;
+  if (fc) fc.forEach(f => { const dt = new Date(f.date+'T12:00:00'); if (dt.getMonth()===m && dt.getFullYear()===state.year){ const d = days[dt.getDate()-1]; if (d){ d.hi=f.hi; d.lo=f.lo; d.code=wmo(f.code); d.source='forecast'; } } });
+  return days;
+}
+
+function renderChart(){
+  const c = state.city, m = state.month, a = state.analysis, days = state.days = monthDays();
+  const s = a.seasons[m];
+  $('chartTitle').textContent = `${MONTHS[m]} in ${c.name}`;
+  $('chartEyebrow').textContent = `${days.length} days · ${c.monthDays ? 'averaged from recent years' : 'typical daily pattern'}`;
+  $('seasonTag').innerHTML = `${icon(SEASONS[s].icon)}${SEASONS[s].label}`;
+  $('fcLegend').hidden = !days.some(d => d.source === 'forecast');
+
+  const svg = $('chart'), W = Math.max(300, $('chartWrap').clientWidth), H = W < 520 ? 230 : 260;
+  const padL = 34, padR = 10, top = 36, bot = 28, n = days.length;
+  const vals = days.flatMap(d => [d.hi, d.lo]);
+  let lo = Math.floor((Math.min(...vals)-2)/5)*5, hi = Math.ceil((Math.max(...vals)+2)/5)*5;
+  if (hi - lo < 10) hi = lo + 10;
+  const x = i => padL + (i+.5)*(W-padL-padR)/n, y = v => top + (hi - v)*(H-top-bot)/(hi-lo), cw = (W-padL-padR)/n;
+  const grid = []; for (let v=lo; v<=hi; v+=5) grid.push(`<line x1="${padL}" x2="${W-padR}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,.1)"/><text x="${padL-6}" y="${y(v)+4}" text-anchor="end">${v}°</text>`);
+  const line = k => days.map((d,i)=>`${i?'L':'M'}${x(i).toFixed(1)},${y(d[k]).toFixed(1)}`).join('');
+  const band = line('hi') + days.slice().reverse().map((d,i)=>`L${x(n-1-i).toFixed(1)},${y(d.lo).toFixed(1)}`).join('') + 'Z';
+  const step = n > 20 && W < 520 ? 2 : 1, isz = Math.min(20, cw*step*.9);
+  const icons = days.map((d,i) => i % step ? '' : `<g transform="translate(${(x(i)-isz/2).toFixed(1)},6) scale(${(isz/48).toFixed(3)})">${icon(d.code).replace(/^<svg[^>]*>|<\/svg>$/g,'')}</g>`).join('');
+  const labels = days.map((d,i) => (d.day===1 || d.day%5===0) ? `<text x="${x(i)}" y="${H-8}" text-anchor="middle">${d.day}</text>` : '').join('');
+  const dots = days.map((d,i) => d.source==='forecast' ? `<circle cx="${x(i)}" cy="${y(d.hi)}" r="3.5" fill="#fff"/><circle cx="${x(i)}" cy="${y(d.lo)}" r="3.5" fill="#fff"/>` : '').join('');
+  const todayIdx = (m === now.getMonth()) ? now.getDate()-1 : -1;
+  const hits = days.map((d,i) => `<rect class="day-hit" data-i="${i}" x="${(x(i)-cw/2).toFixed(1)}" y="${top-30}" width="${cw.toFixed(1)}" height="${H-top+30-bot+20}" fill="transparent" tabindex="0" role="button" aria-label="${MONTHS[m]} ${d.day}: high ${round(d.hi)}, low ${round(d.lo)}, ${COND[d.code]}"/>`).join('');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('width', W); svg.setAttribute('height', H);
+  svg.innerHTML = `
+    <defs><linearGradient id="bandG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc35a" stop-opacity=".35"/><stop offset="1" stop-color="#7fd3ff" stop-opacity=".25"/></linearGradient></defs>
+    ${grid.join('')}
+    ${todayIdx>=0 && todayIdx<n ? `<rect x="${x(todayIdx)-cw/2}" y="${top}" width="${cw}" height="${H-top-bot}" fill="rgba(255,255,255,.08)"/><text x="${x(todayIdx)}" y="${H-bot+12}" text-anchor="middle" style="fill:#ffc35a">today</text>` : ''}
+    <path d="${band}" fill="url(#bandG)"/>
+    <path d="${line('hi')}" fill="none" stroke="#ffc35a" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="${line('lo')}" fill="none" stroke="#7fd3ff" stroke-width="2.5" stroke-linejoin="round"/>
+    ${dots}${icons}${labels}
+    <rect id="selDay" x="0" y="${top}" width="${cw}" height="${H-top-bot}" fill="none" stroke="#ffc35a" stroke-width="1.5" rx="4" visibility="hidden"/>
+    ${hits}`;
+  const avg = k => days.reduce((s,d)=>s+d[k],0)/n;
+  const wet = days.filter(d => d.code==='rain'||d.code==='storm'||d.code==='snow').length;
+  const hottest = days.reduce((a,b)=> b.hi>a.hi?b:a), coldest = days.reduce((a,b)=> b.lo<a.lo?b:a);
+  $('monthSummary').innerHTML = [['Average high', round(avg('hi'))+'°C'], ['Average low', round(avg('lo'))+'°C'], ['Wet days', `${wet} of ${n}`], ['Rainfall', round(c.rain[m])+' mm'], ['Warmest', `${round(hottest.hi)}°C on the ${hottest.day}${ord(hottest.day)}`], ['Coolest night', `${round(coldest.lo)}°C on the ${coldest.day}${ord(coldest.day)}`]]
+    .map(([k,v]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(k)}</span></div>`).join('');
+}
+const ord = d => (d%10===1&&d!==11)?'st':(d%10===2&&d!==12)?'nd':(d%10===3&&d!==13)?'rd':'th';
+
+function pickDay(i){
+  const d = state.days[i]; if (!d) return;
+  const c = state.city, m = state.month, svg = $('chart');
+  const sel = svg.querySelector('#selDay'), hit = svg.querySelector(`.day-hit[data-i="${i}"]`);
+  sel.setAttribute('x', hit.getAttribute('x')); sel.setAttribute('visibility','visible');
+  const tip = $('tip'); tip.hidden = false;
+  tip.innerHTML = `<b>${d.day} ${MS[m]}</b> · ${esc(COND[d.code])}<br>High <b>${round(d.hi)}°</b> · Low <b>${round(d.lo)}°</b>${d.source==='forecast'?' · forecast':''}`;
+  const bx = parseFloat(hit.getAttribute('x')) + parseFloat(hit.getAttribute('width'))/2, wrapW = $('chartWrap').clientWidth;
+  tip.style.left = Math.min(wrapW-90, Math.max(90, bx)) + 'px'; tip.style.top = '36px';
+  setScene({code:d.code, isDay:true, label:`${COND[d.code]} · ${d.day} ${MONTHS[m]} in ${c.name}`}, true);
+}
+
+function renderBest(){
+  const c = state.city, a = state.analysis, adv = c.advice;
+  $('bestRange').textContent = adv && adv.best_months ? rangeText(adv.best_months.map(x=>x-1).sort((p,q)=>p-q)) : rangeText(a.best);
+  $('bestWhy').textContent = adv && adv.best_why ? adv.best_why : bestWhy(c, a);
+  $('bestTip').textContent = adv && adv.tip ? adv.tip : (c.tip || '');
+  $('bestTip').hidden = !$('bestTip').textContent;
+  const bm = adv && adv.best_months ? adv.best_months.map(x=>x-1) : a.best;
+  $('bestReasons').innerHTML = bm.slice().sort((p,q)=>p-q).map(m => `<li>${icon(SEASONS[a.seasons[m]].icon)}<span><b>${MONTHS[m]}</b>: ${esc(reasonFor(m))}</span></li>`).join('');
+  $('adviceBy').textContent = adv && adv.generated_by === 'claude' ? 'Advice written by Claude from the climate data above.' : 'Advice generated from climate rules: comfortable temperatures, little rain and low humidity score highest.';
+}
+function reasonFor(m){
+  const adv = state.city.advice;
+  const r = adv && adv.months && adv.months.find(x => x.month === m+1);
+  return r ? r.why : monthReason(state.city, state.analysis, m);
+}
+function ratingFor(m){
+  const adv = state.city.advice, r = adv && adv.months && adv.months.find(x => x.month === m+1);
+  return r && r.rating ? r.rating : state.analysis.ratings[m];
+}
+function renderOthers(){
+  const c = state.city, a = state.analysis;
+  const order = MS.map((_,i)=>i).filter(m => ratingFor(m) !== 'best');
+  $('mgrid').innerHTML = order.map(m => `<button type="button" class="mcard" data-m="${m}" aria-current="${m===state.month}">
+      <div class="row">${icon(SEASONS[a.seasons[m]].icon)}<h3>${MONTHS[m]}</h3><span class="rate ${ratingFor(m)}">${ratingFor(m)}</span></div>
+      <div class="nums">${round(c.hi[m])}° / ${round(c.lo[m])}° · ${round(c.rain[m])} mm · ${SEASONS[a.seasons[m]].label}</div>
+      <p>${esc(reasonFor(m))}</p></button>`).join('');
+}
+function renderPlaces(){
+  const c = state.city, adv = c.advice;
+  const list = (adv && adv.places && adv.places.length) ? adv.places : (c.places || []);
+  $('placesTitle').textContent = `Places to visit in ${c.name}`;
+  $('places').innerHTML = list.length ? list.map(p => `<li><div><div class="type">${esc(p.type||'Sight')}</div><h3>${esc(p.name)}</h3><p>${esc(p.desc||p.description||'')}</p></div></li>`).join('')
+    : `<li><div><h3>No suggestions yet</h3><p>Place suggestions for this city come from Claude. In the full app, add an Anthropic API key to the backend to see them.</p></div></li>`;
+  $('placesWhen').textContent = `Best visited in ${$('bestRange').textContent}.`;
+}
+
+function renderAll(){
+  state.analysis = analyse(state.city);
+  renderToday(); renderMonths(); renderChart(); renderBest(); renderOthers(); renderPlaces();
+}
+function selectMonth(m){
+  state.month = m; renderMonths(); renderChart(); renderOthers(); $('tip').hidden = true;
+  const s = state.analysis.seasons[m], d = state.days, counts = {};
+  d.forEach(x => counts[x.code] = (counts[x.code]||0)+1);
+  const wet = (counts.rain||0)+(counts.storm||0)+(counts.snow||0);
+  const code = (counts.snow||0) > 3 ? 'snow' : (counts.storm||0) > 3 ? 'storm' : wet > d.length*.35 ? 'rain' : Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+  setScene({code, isDay:true, label:`${COND[code]} · a typical ${MONTHS[m]} day`}, true);
+}
+
+/* ---------- finding a city: built-in → Skycast backend → Open-Meteo in the browser → Claude ---------- */
+const norm = s => String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const ALIASES = {delhi:'delhi', 'new delhi':'delhi', calcutta:'kolkata', bombay:'mumbai', nyc:'newyork', 'new york city':'newyork', denpasar:'bali', 'cape town':'capetown'};
+function findBuiltIn(q){
+  const n = norm(q).replace(/,.*$/,'').trim();
+  const id = ALIASES[n] || n.replace(/ /g,'');
+  return DATA.cities.find(c => c.id === id || norm(c.name) === n) || null;
+}
+const slug = s => norm(s).replace(/ /g,'-') || 'city';
+function setSource(kind, text){ const el = $('src'); el.classList.toggle('live', kind==='live'); el.querySelector('span').textContent = text; }
+function say(text, err){ const el = $('searchMsg'); el.hidden = !text; el.textContent = text || ''; el.classList.toggle('err', !!err); }
+async function fetchJSON(url, ms=6000){
+  const ctl = new AbortController(), timer = setTimeout(()=>ctl.abort(), ms);
+  try { const r = await fetch(url, {signal: ctl.signal}); if (!r.ok) throw Object.assign(new Error('HTTP '+r.status), {status:r.status}); return await r.json(); } finally { clearTimeout(timer); }
+}
+async function detectBackend(){
+  if (!/^https?:$/.test(location.protocol)) return false;
+  try { const j = await fetchJSON('api/health', 1500); return j && j.service === 'skycast'; } catch { return false; }
+}
+// Claude, when this page runs inside a Claude viewer (resolves null elsewhere)
+const samplePromise = (window.claude && window.claude.use) ? window.claude.use('sample').catch(() => null) : Promise.resolve(null);
+
+let geoBlocked = false;   // remember when the browser cannot reach Open-Meteo, so we stop trying
+async function geocode(q){
+  if (state.backend) return fetchJSON(`api/geocode?q=${encodeURIComponent(q)}`, 6000);
+  if (geoBlocked) return null;
+  try {
+    const j = await fetchJSON(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en&format=json`, 4000);
+    return (j.results||[]).map(r => ({name:r.name, country:r.country||'', admin1:r.admin1||'', lat:r.latitude, lon:r.longitude, tz:r.timezone||'UTC'}));
+  } catch { geoBlocked = true; return null; }
+}
+async function directLive(c){
+  const u = `https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,precipitation,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,weather_code&forecast_days=16&timezone=auto`;
+  const j = await fetchJSON(u, 6000), dl = j.daily;
+  return { via:'browser', current:{temp:j.current.temperature_2m, feels:j.current.apparent_temperature, humidity:j.current.relative_humidity_2m, wind:j.current.wind_speed_10m, precip:j.current.precipitation, code:j.current.weather_code, is_day:j.current.is_day, hi:dl.temperature_2m_max[0], lo:dl.temperature_2m_min[0]},
+    forecast: dl.time.map((d,i)=>({date:d, hi:dl.temperature_2m_max[i], lo:dl.temperature_2m_min[i], code:dl.weather_code[i]})) };
+}
+// Five full years of daily history, averaged into monthly normals and day-of-month normals (same as the backend)
+async function directClimate(g){
+  const y = now.getFullYear();
+  const j = await fetchJSON(`https://archive-api.open-meteo.com/v1/archive?latitude=${g.lat}&longitude=${g.lon}&start_date=${y-5}-01-01&end_date=${y-1}-12-31&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto`, 20000);
+  const d = j.daily, byDay = {}, rainMY = {};
+  d.time.forEach((t,i) => {
+    const [yy,mm,dd] = t.split('-').map(Number), hi = d.temperature_2m_max[i], lo = d.temperature_2m_min[i];
+    if (hi == null || lo == null) return;
+    const k = (mm-1)*100+dd; (byDay[k] = byDay[k] || {hi:[],lo:[]}); byDay[k].hi.push(hi); byDay[k].lo.push(lo);
+    rainMY[yy*100+mm] = (rainMY[yy*100+mm]||0) + (d.precipitation_sum[i]||0);
+  });
+  const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
+  const out = {hi:[], lo:[], rain:[], monthDays:[]};
+  for (let m=0; m<12; m++){
+    const days = []; for (let dd=1; dd<=daysIn(y,m); dd++){ const s = byDay[m*100+dd]; if (s) days.push({day:dd, hi:+mean(s.hi).toFixed(1), lo:+mean(s.lo).toFixed(1), source:'climate'}); }
+    out.monthDays.push(days);
+    out.hi.push(+mean(days.map(x=>x.hi)).toFixed(1)); out.lo.push(+mean(days.map(x=>x.lo)).toFixed(1));
+    const tot = Object.entries(rainMY).filter(([k]) => +k%100 === m+1).map(([,v])=>v);
+    out.rain.push(Math.round(tot.length ? mean(tot) : 0));
+  }
+  return out;
+}
+const isNums = (a, lo, hi) => Array.isArray(a) && a.length === 12 && a.every(v => typeof v === 'number' && isFinite(v) && v >= lo && v <= hi);
+async function claudeCity(sample, q){
+  const prompt = `You are a climate and travel reference. The user typed this place name: "${q.slice(0,80)}".
+Identify the real city or town it most likely means (anywhere in the world). If it is not a real place, answer {"error":"not_found"}.
+Otherwise answer with JSON only, no prose, in exactly this shape:
+{"name":"City","country":"Country","lat":0.0,"lon":0.0,"tz":"IANA/Timezone",
+ "hi":[12 numbers: average daily high °C, Jan to Dec],
+ "lo":[12 numbers: average daily low °C, Jan to Dec],
+ "rain":[12 numbers: average monthly precipitation in mm, Jan to Dec],
+ "tip":"one practical seasonal tip for visitors (a festival, closure or weather hazard), under 160 characters",
+ "places":[6 to 8 of {"name":"...","type":"one word such as Heritage, Nature, Food, Market, Beach, Spiritual, Viewpoint, Culture","desc":"one sentence under 110 characters with a practical tip"}]}
+Use 1991-2020 climate normals rounded to whole numbers.`;
+  const r = await sample.json(prompt, {modelTier:'default'});
+  if (!r || r.error) throw Object.assign(new Error('not found'), {code:'not_found'});
+  if (!isNums(r.hi,-60,60) || !isNums(r.lo,-70,50) || !isNums(r.rain,0,3000) || typeof r.lat !== 'number' || typeof r.lon !== 'number') throw Object.assign(new Error('bad data'), {code:'bad_data'});
+  return {id:slug(r.name), name:String(r.name), country:String(r.country||''), region:'', lat:r.lat, lon:r.lon, tz:r.tz||'UTC', hi:r.hi, lo:r.lo, rain:r.rain, tip:String(r.tip||''),
+    places:(Array.isArray(r.places)?r.places:[]).slice(0,8).map(p=>({name:String(p.name||''), type:String(p.type||'Sight'), desc:String(p.desc||'')})).filter(p=>p.name), estimated:'claude'};
+}
+async function claudePlaces(sample, c){
+  const r = await sample.json(`List the most important places for a visitor to see in ${c.name}, ${c.country}. Answer with JSON only: {"tip":"one practical seasonal tip under 160 characters","places":[6 to 8 of {"name":"...","type":"one word category","desc":"one sentence under 110 characters with a practical tip"}]}`, {modelTier:'default'});
+  return r && Array.isArray(r.places) ? r : null;
+}
+const SAMPLE_ERR = {not_granted:'Claude lookups were not allowed, so only the built-in cities are available here.', rate_limited:'Too many lookups at once. Wait a moment and try again.', not_found:'No city by that name was found. Check the spelling, or add the country (for example "Perth, Australia").', bad_data:'Claude returned incomplete climate data for that city. Try again or try a nearby larger city.'};
+
+let loadSeq = 0;
+async function loadCity(query, geo){
+  query = String(query||'').trim(); if (!query) return;
+  const seq = ++loadSeq, fresh = () => seq === loadSeq;
+  hideSuggest(); say('');
+  const base = (!geo || norm(geo.name) === norm((findBuiltIn(geo.name)||{}).name)) ? findBuiltIn(geo ? geo.name : query) : null;
+  if (base){ state.city = {...base}; state.live = null; renderAll(); $('cityInput').value = base.name; remember(base.name); }
+
+  // 1. Skycast backend: real geocoding, climate history, forecast and Claude advice for any city
+  if (state.backend){
+    setSource('', 'Loading live data…'); if (!base) say(`Looking up ${query}…`);
+    try {
+      const p = new URLSearchParams({city: geo ? geo.name : query});
+      if (geo) ['lat','lon','country','tz'].forEach(k => geo[k] != null && p.set(k, geo[k]));
+      const r = await fetchJSON(`api/report?${p}`, 120000);
+      if (!fresh()) return;
+      state.city = {...(base||{}), ...r.city, id: base ? base.id : slug(r.city.name), hi:r.climate.hi, lo:r.climate.lo, rain:r.climate.rain, monthDays:r.climate.month_days, advice:r.advice,
+        places: (r.advice && r.advice.places && r.advice.places.length) ? r.advice.places : (base ? base.places : [])};
+      state.live = r.current ? {current:r.current, forecast:r.forecast, via:'Skycast backend'} : null;
+      renderAll(); $('cityInput').value = r.city.name; say('');
+      setSource('live', r.advice && r.advice.generated_by === 'claude' ? 'Live · Open-Meteo + Claude' : 'Live · Open-Meteo');
+    } catch (e) {
+      if (!fresh()) return;
+      setSource('', base ? 'Built-in climate data' : 'Not found');
+      say(e.status === 404 ? SAMPLE_ERR.not_found : base ? 'The backend could not reach the weather service, so this uses built-in data.' : 'The backend could not reach the weather service. Try again shortly.', !base);
+    }
+    return;
+  }
+
+  // 2. Open-Meteo straight from the browser (works when the page is opened as a file or on most hosts)
+  if (base){
+    try { const live = await directLive(state.city); if (!fresh()) return; state.live = live; renderToday(); renderChart(); setSource('live', 'Live weather · built-in climate'); }
+    catch { if (fresh()) setSource('', 'Built-in climate data'); }
+    return;
+  }
+  say(`Looking up ${query}…`);
+  let g = geo;
+  if (!g){ const hits = await geocode(query); if (!fresh()) return; if (hits && !hits.length){ say(SAMPLE_ERR.not_found, true); return; } g = hits && hits[0]; }
+  if (g && !geoBlocked){
+    try {
+      const [clim, live] = await Promise.all([directClimate(g), directLive(g).catch(() => null)]);
+      if (!fresh()) return;
+      state.city = {id:slug(g.name), name:g.name, country:g.country, region:'', lat:g.lat, lon:g.lon, tz:g.tz, hi:clim.hi, lo:clim.lo, rain:clim.rain, monthDays:clim.monthDays, places:[], tip:''};
+      state.live = live; renderAll(); $('cityInput').value = g.name; remember(g.name); say('');
+      setSource('live', 'Live · Open-Meteo');
+      const sample = await samplePromise;
+      if (sample){ try { const extra = await claudePlaces(sample, state.city); if (fresh() && extra){ state.city.places = extra.places; state.city.tip = extra.tip || ''; renderBest(); renderPlaces(); } } catch {} }
+      return;
+    } catch { geoBlocked = true; if (!fresh()) return; }
+  }
+
+  // 3. Claude estimates the climate normals and places (the published preview, where outside sites are blocked)
+  const sample = await samplePromise;
+  if (!fresh()) return;
+  if (!sample){ say(`Live city search needs the Skycast backend or an internet connection to Open-Meteo. Try one of the built-in cities meanwhile.`, true); return; }
+  say(`Asking Claude for ${query}'s climate and sights…`); setSource('', 'Asking Claude…');
+  try {
+    const c = await claudeCity(sample, query);
+    if (!fresh()) return;
+    state.city = c; state.live = null; renderAll(); $('cityInput').value = c.name; remember(c.name); say('');
+    setSource('', 'Climate estimated by Claude');
+  } catch (e) {
+    if (!fresh()) return;
+    setSource('', 'Built-in climate data');
+    say(SAMPLE_ERR[e.code] || 'That lookup failed. Try again in a moment.', true);
+  }
+}
+function remember(name){ try { localStorage.setItem('skycast.city', name); } catch {} }
+
+/* ---------- search box with suggestions (click and Enter handlers only: no form submits) ---------- */
+const input = $('cityInput'), list = $('suggest');
+let hits = [], active = -1, sugSeq = 0, sugTimer;
+function hideSuggest(){ list.hidden = true; input.setAttribute('aria-expanded','false'); active = -1; }
+function showSuggest(){
+  if (!hits.length){ hideSuggest(); return; }
+  list.innerHTML = hits.map((h,i) => `<li role="option" id="sg${i}" data-i="${i}" aria-selected="${i===active}"><span>${esc(h.name)}</span><small>${esc([h.admin1, h.country].filter(Boolean).join(', '))}</small></li>`).join('');
+  list.hidden = false; input.setAttribute('aria-expanded','true');
+  input.setAttribute('aria-activedescendant', active >= 0 ? 'sg'+active : '');
+}
+function builtInHits(q){
+  const n = norm(q); if (!n) return [];
+  return DATA.cities.filter(c => norm(c.name).startsWith(n) || c.id.startsWith(n.replace(/ /g,''))).slice(0,5)
+    .map(c => ({name:c.name, country:c.country, admin1:'', lat:c.lat, lon:c.lon, tz:c.tz, builtin:true}));
+}
+input.addEventListener('input', () => {
+  const q = input.value.trim(), seq = ++sugSeq;
+  hits = builtInHits(q); active = -1; showSuggest();
+  clearTimeout(sugTimer);
+  if (q.length < 2) return;
+  sugTimer = setTimeout(async () => {
+    const g = await geocode(q).catch(() => null);
+    if (seq !== sugSeq || !g) return;
+    const seen = new Set(hits.map(h => norm(h.name)+'|'+norm(h.country)));
+    hits = hits.concat(g.filter(h => !seen.has(norm(h.name)+'|'+norm(h.country)))).slice(0,7);
+    showSuggest();
+  }, 250);
+});
+input.addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    if (!hits.length) return; e.preventDefault();
+    active = (active + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length; showSuggest();
+  } else if (e.key === 'Enter'){
+    e.preventDefault();
+    if (active >= 0 && hits[active]) pick(hits[active]); else loadCity(input.value);
+  } else if (e.key === 'Escape') hideSuggest();
+});
+input.addEventListener('blur', () => setTimeout(hideSuggest, 150));
+list.addEventListener('mousedown', e => e.preventDefault());
+list.addEventListener('click', e => { const li = e.target.closest('li'); if (li) pick(hits[+li.dataset.i]); });
+function pick(h){ input.value = h.name; hideSuggest(); loadCity(h.name, h.builtin ? null : h); }
+$('go').addEventListener('click', () => loadCity(input.value));
+$('quick').innerHTML = 'Try: ' + ['kolkata','paris','tokyo','newyork','dubai','sydney','capetown'].map(id => { const c = builtInHits(id)[0] || findBuiltIn(id); return `<button type="button" data-q="${esc(c.name)}">${esc(c.name)}</button>`; }).join('');
+$('quick').addEventListener('click', e => { const b = e.target.closest('button'); if (b){ input.value = b.dataset.q; loadCity(b.dataset.q); } });
+
+$('months').addEventListener('click', e => { const b = e.target.closest('.mbtn'); if (b) selectMonth(+b.dataset.m); });
+$('mgrid').addEventListener('click', e => { const b = e.target.closest('.mcard'); if (b){ selectMonth(+b.dataset.m); $('chartTitle').scrollIntoView({behavior: reduceMotion ? 'auto' : 'smooth', block:'center'}); } });
+$('chart').addEventListener('click', e => { const h = e.target.closest('.day-hit'); if (h) pickDay(+h.dataset.i); });
+$('chart').addEventListener('keydown', e => { const h = e.target.closest('.day-hit'); if (h && (e.key==='Enter'||e.key===' ')){ e.preventDefault(); pickDay(+h.dataset.i); } });
+$('sceneReset').addEventListener('click', () => { $('tip').hidden = true; const s = $('chart').querySelector('#selDay'); if (s) s.setAttribute('visibility','hidden'); setScene(state.today, false); });
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => state.city && renderChart(), 150); });
+
+let start = 'Kolkata';
+try { const saved = localStorage.getItem('skycast.city'); if (saved && findBuiltIn(saved)) start = saved; } catch {}
+input.value = start;
+loadCity(start);
+detectBackend().then(ok => {
+  if (!ok) return;
+  state.backend = true;
+  $('foot').textContent = 'Connected to the Skycast backend: live weather and climate history from Open-Meteo for any city, advice from Claude when an API key is set.';
+  loadCity(state.city ? state.city.name : start);
+});
+})();
+
+</script>
