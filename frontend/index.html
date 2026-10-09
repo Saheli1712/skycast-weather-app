@@ -730,9 +730,9 @@ function renderPlaces(){
   const c = state.city, adv = c.advice;
   const list = (adv && adv.places && adv.places.length) ? adv.places : (c.places || []);
   $('placesTitle').textContent = `Places to visit in ${c.name}`;
-  $('places').innerHTML = list.length ? list.map(p => `<li><div><div class="type">${esc(p.type||'Sight')}</div><h3>${esc(p.name)}</h3><p>${esc(p.desc||p.description||'')}</p></div></li>`).join('')
-    : `<li><div><h3>No suggestions yet</h3><p>Place suggestions for this city come from Claude. In the full app, add an Anthropic API key to the backend to see them.</p></div></li>`;
-  $('placesWhen').textContent = `Best visited in ${$('bestRange').textContent}.`;
+  $('places').innerHTML = list.length ? list.map(p => `<li><div><div class="type">${esc(p.type||'Sight')}</div><h3>${p.pageid ? `<a href="https://en.wikipedia.org/?curid=${encodeURIComponent(p.pageid)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}</a>` : esc(p.name)}</h3><p>${esc(p.desc||p.description||'')}</p></div></li>`).join('')
+    : `<li><div><h3>No nearby places found</h3><p>${c.placesStatus === 'unavailable' ? 'Nearby place suggestions are temporarily unavailable. Please try again shortly.' : c.placesStatus === 'empty' ? 'No nearby place articles were found for this location.' : 'Nearby place suggestions are still loading.'}</p></div></li>`;
+  $('placesWhen').innerHTML = `Best visited in ${esc($('bestRange').textContent)}.${list.some(p => p.pageid) ? ' Nearby place details from <a href="https://www.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipedia</a>.' : ''}`;
 }
 
 function renderAll(){
@@ -807,6 +807,34 @@ async function directClimate(g){
   }
   return out;
 }
+async function directPlaces(g){
+  const params = new URLSearchParams({
+    action:'query', generator:'geosearch', ggscoord:`${g.lat}|${g.lon}`, ggsradius:'10000',
+    ggslimit:'50', ggsnamespace:'0', prop:'extracts|coordinates', exintro:'1',
+    explaintext:'1', exchars:'500', format:'json', origin:'*'
+  });
+  const result = await fetchJSON(`https://en.wikipedia.org/w/api.php?${params}`, 12000);
+  const pages = Object.values(result.query && result.query.pages || {});
+  const excluded = /\b(?:airport|constituency|demographics|district|election|hospital|municipality|population|railway station|school|university|ward)\b/i;
+  const attraction = /\b(?:attraction|beach|bridge|castle|cathedral|citadel|fort|garden|heritage|historic|landmark|market|memorial|monument|mosque|museum|palace|park|temple|theatre|theater|tower|zoo|aquarium|gallery|shrine|waterfall|sanctuary|observatory|botanical|mausoleum|square|fountain|stadium)\b/i;
+  const candidates = pages.map(p => {
+    const title = p.title || '', extract = (p.extract || '').replace(/\s+/g, ' ').trim();
+    const titleIsPlace = /\bcollege street\b/i.test(title);
+    const score = (attraction.test(title) ? 10 : 0) + (attraction.test(extract) ? 2 : 0);
+    return {title, extract, pageid:p.pageid, score, excluded:(excluded.test(title) && !titleIsPlace) || title.trim().toLowerCase() === String(g.name || '').trim().toLowerCase()};
+  }).filter(p => p.title && p.extract && !p.excluded);
+  const ranked = candidates.filter(p => p.score > 0).sort((a,b) => b.score-a.score)
+    .concat(candidates.filter(p => p.score === 0));
+  return ranked.slice(0,8).map(p => {
+    const type = /\b(?:park|garden|beach|lake|waterfall|zoo|sanctuary|botanical|mountain|island)\b/i.test(p.title) ? 'Nature'
+      : /\b(?:temple|church|mosque|cathedral|shrine)\b/i.test(p.title) ? 'Spiritual'
+      : /\b(?:museum|gallery|theatre|theater|observatory)\b/i.test(p.title) ? 'Culture'
+      : /\b(?:market|bazaar)\b/i.test(p.title) ? 'Food & market' : 'Heritage';
+    const firstSentence = p.extract.match(/^.*?[.!?](?:\s|$)/);
+    const desc = (firstSentence ? firstSentence[0] : p.extract).trim();
+    return {name:p.title, type, desc:desc.length > 220 ? `${desc.slice(0,217).trimEnd()}...` : desc, pageid:p.pageid};
+  });
+}
 const isNums = (a, lo, hi) => Array.isArray(a) && a.length === 12 && a.every(v => typeof v === 'number' && isFinite(v) && v >= lo && v <= hi);
 async function claudeCity(sample, q){
   const prompt = `You are a climate and travel reference. The user typed this place name: "${q.slice(0,80)}".
@@ -847,8 +875,15 @@ async function loadCity(query, geo){
       if (geo) ['lat','lon','country','tz'].forEach(k => geo[k] != null && p.set(k, geo[k]));
       const r = await fetchJSON(`api/report?${p}`, 120000);
       if (!fresh()) return;
+      let places = (r.advice && r.advice.places && r.advice.places.length) ? r.advice.places : (base ? base.places : []);
+      let placesStatus = places.length ? 'ready' : 'loading';
+      if (!places.length) {
+        try { places = await directPlaces(r.city); placesStatus = places.length ? 'ready' : 'empty'; }
+        catch { placesStatus = 'unavailable'; }
+      }
+      if (!fresh()) return;
       state.city = {...(base||{}), ...r.city, id: base ? base.id : slug(r.city.name), hi:r.climate.hi, lo:r.climate.lo, rain:r.climate.rain, monthDays:r.climate.month_days, advice:r.advice,
-        places: (r.advice && r.advice.places && r.advice.places.length) ? r.advice.places : (base ? base.places : [])};
+        places, placesStatus};
       state.live = r.current ? {current:r.current, forecast:r.forecast, via:'Skycast backend'} : null;
       renderAll(); $('cityInput').value = r.city.name; say('');
       setSource('live', r.advice && r.advice.generated_by === 'claude' ? 'Live · Open-Meteo + Claude' : 'Live · Open-Meteo');
@@ -871,9 +906,12 @@ async function loadCity(query, geo){
   if (!g){ const hits = await geocode(query); if (!fresh()) return; if (hits && !hits.length){ say(SAMPLE_ERR.not_found, true); return; } g = hits && hits[0]; }
   if (g && !geoBlocked){
     try {
-      const [clim, live] = await Promise.all([directClimate(g), directLive(g).catch(() => null)]);
+      const [clim, live, placeResult] = await Promise.all([
+        directClimate(g), directLive(g).catch(() => null),
+        directPlaces(g).then(places => ({places, error:false}), () => ({places:[], error:true}))
+      ]);
       if (!fresh()) return;
-      state.city = {id:slug(g.name), name:g.name, country:g.country, region:'', lat:g.lat, lon:g.lon, tz:g.tz, hi:clim.hi, lo:clim.lo, rain:clim.rain, monthDays:clim.monthDays, places:[], tip:''};
+      state.city = {id:slug(g.name), name:g.name, country:g.country, region:'', lat:g.lat, lon:g.lon, tz:g.tz, hi:clim.hi, lo:clim.lo, rain:clim.rain, monthDays:clim.monthDays, places:placeResult.places, placesStatus:placeResult.error ? 'unavailable' : placeResult.places.length ? 'ready' : 'empty', tip:''};
       state.live = live; renderAll(); $('cityInput').value = g.name; remember(g.name); say('');
       setSource('live', 'Live · Open-Meteo');
       const sample = await samplePromise;

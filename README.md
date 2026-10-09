@@ -25,12 +25,13 @@ python -m skycast           # open http://127.0.0.1:8000
    LangGraph workflow returns live weather, a 7-day outlook, real day-by-day climate averages and Claude's advice.
    Type `Perth, Australia` to pick between places with the same name.
 3. **No backend, but the browser can reach Open-Meteo** (opening the file locally): the page geocodes and
-   pulls five years of climate history and the forecast itself.
+   pulls five years of climate history and the forecast itself. For cities without built-in place data,
+   nearby Wikipedia articles are used for place suggestions.
 4. **Published preview on claude.ai** (outside sites are blocked there): the page asks Claude for the city's
    climate averages and sights, and labels them "Climate estimated by Claude".
 
-Without an Anthropic key the backend's advice comes from the climate rules, and places are only listed
-for the built-in cities.
+Without an Anthropic key the backend's advice comes from the climate rules. Built-in cities use curated
+place suggestions; other cities load nearby place articles from Wikipedia when the browser can reach its API.
 
 Try the workflow from the command line: `python -m skycast report "Kyoto"`.
 
